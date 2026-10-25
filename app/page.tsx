@@ -1,87 +1,123 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
-const missions = [
-  { id: "M-001", name: "FIRST CONTACT", rank: "E", type: "SIGNAL ANALYSIS", status: "AVAILABLE", detail: "알 수 없는 신호의 패턴을 분석하고 발신 코드를 복원하라." },
-  { id: "M-002", name: "GHOST SIGNAL", rank: "D", type: "ENCRYPTION", status: "LOCKED", detail: "FIRST CONTACT 클리어 후 잠금 해제" },
-  { id: "M-003", name: "BROKEN WALL", rank: "C", type: "LOGIC PUZZLE", status: "LOCKED", detail: "GHOST SIGNAL 클리어 후 잠금 해제" },
+type Mission = { id: number; name: string; rank: string; enemy: string; power: number; reward: number; exp: number; unlocked: boolean };
+
+const missions: Mission[] = [
+  { id: 1, name: "FIRST CONTACT", rank: "E", enemy: "ROGUE DRONE", power: 18, reward: 60, exp: 45, unlocked: true },
+  { id: 2, name: "GHOST SIGNAL", rank: "D", enemy: "SECURITY BOT", power: 32, reward: 100, exp: 75, unlocked: false },
+  { id: 3, name: "BROKEN WALL", rank: "C", enemy: "SENTINEL MK-I", power: 55, reward: 160, exp: 120, unlocked: false },
 ];
 
 export default function Home() {
-  const [active, setActive] = useState(missions[0]);
-  const [lines, setLines] = useState<string[]>([
-    "BLACKOUT OS v0.1.0 // SECURE SESSION",
-    "연결 완료. 모든 명령은 시뮬레이션 환경에서만 실행됩니다.",
-    "도움말을 보려면 help 를 입력하세요.",
-  ]);
-  const [command, setCommand] = useState("");
-  const [cleared, setCleared] = useState(false);
+  const [level, setLevel] = useState(1);
+  const [exp, setExp] = useState(0);
+  const [credits, setCredits] = useState(250);
+  const [power, setPower] = useState(24);
+  const [cleared, setCleared] = useState<number[]>([]);
+  const [selected, setSelected] = useState(1);
+  const [battle, setBattle] = useState(false);
+  const [playerHp, setPlayerHp] = useState(100);
+  const [enemyHp, setEnemyHp] = useState(100);
+  const [feed, setFeed] = useState<string[]>(["BLACKOUT combat simulator ready.", "미션을 선택하고 자동 전투를 시작하세요."]);
+  const [busy, setBusy] = useState(false);
 
-  function runCommand() {
-    const value = command.trim().toLowerCase();
-    if (!value) return;
-    let output = "";
-    if (value === "help") output = "명령어: help / status / scan / analyze / decrypt / mission / hint / clear";
-    else if (value === "status") output = "USER: ROOKIE  |  LEVEL: 01  |  EXP: 0/100  |  CREDITS: 250";
-    else if (value === "scan") output = "SCAN COMPLETE // SIGNAL FOUND: 7F-2A-91 // ENCRYPTION: BASIC";
-    else if (value === "analyze") output = "패턴 분석 결과: 숫자 시퀀스의 각 값은 3씩 증가합니다. 다음 값은 10.";
-    else if (value === "decrypt") output = "암호 해독 대기 중. 분석 결과를 확인하고 미션을 진행하세요.";
-    else if (value === "mission") output = active.name + " // " + active.detail;
-    else if (value === "hint") output = "힌트: 신호에 포함된 숫자의 규칙을 먼저 찾아보세요.";
-    else if (value === "clear") { setLines([]); setCommand(""); return; }
-    else if (value === "10" || value === "answer 10") {
-      if (!cleared) { setCleared(true); output = "MISSION CLEAR // FIRST CONTACT 완료! 보상 +100 EXP, +50 CREDITS"; }
-      else output = "이미 완료한 미션입니다.";
+  const mission = missions[selected - 1];
+  const needExp = level * 100;
+  const unlocked = (id: number) => id === 1 || cleared.includes(id - 1);
+
+  useEffect(() => {
+    if (!battle || busy) return;
+    setBusy(true);
+    const timer = window.setTimeout(() => {
+      const damage = Math.max(7, power + Math.floor(Math.random() * 9) - 5);
+      const nextEnemy = Math.max(0, enemyHp - damage);
+      setEnemyHp(nextEnemy);
+      setFeed((old) => [...old, `ROOKIE attacks ${mission.enemy} for ${damage} DMG.`]);
+      if (nextEnemy <= 0) {
+        setBattle(false);
+        setBusy(false);
+        setCleared((old) => old.includes(mission.id) ? old : [...old, mission.id]);
+        setCredits((old) => old + mission.reward);
+        setExp((old) => {
+          let total = old + mission.exp;
+          let nextLevel = level;
+          while (total >= nextLevel * 100) {
+            total -= nextLevel * 100;
+            nextLevel += 1;
+          }
+          if (nextLevel > level) {
+            setLevel(nextLevel);
+            setPower((p) => p + (nextLevel - level) * 5);
+            setFeed((f) => [...f, `LEVEL UP! AGENT LEVEL ${nextLevel} // COMBAT POWER INCREASED`]);
+          }
+          return total;
+        });
+        setFeed((old) => [...old, `MISSION CLEAR! +${mission.exp} EXP / +${mission.reward} CR`]);
+        return;
+      }
+      const retaliation = Math.max(5, Math.floor(mission.power * 0.45) + Math.floor(Math.random() * 5));
+      const nextPlayer = Math.max(0, playerHp - retaliation);
+      setPlayerHp(nextPlayer);
+      setFeed((old) => [...old, `${mission.enemy} counterattacks for ${retaliation} DMG.`]);
+      if (nextPlayer <= 0) {
+        setBattle(false);
+        setFeed((old) => [...old, "MISSION FAILED. Recover and try again."]);
+      }
+      setBusy(false);
+    }, 850);
+    return () => window.clearTimeout(timer);
+  }, [battle, busy, enemyHp, playerHp, power, mission, level]);
+
+  function startMission() {
+    if (!unlocked(mission.id) || cleared.includes(mission.id)) return;
+    setPlayerHp(100);
+    setEnemyHp(100);
+    setBattle(true);
+    setFeed((old) => [...old, `MISSION START // ${mission.name}`, `TARGET: ${mission.enemy}`]);
+  }
+
+  function upgrade() {
+    if (credits < 100) {
+      setFeed((old) => [...old, "NOT ENOUGH CREDITS. Upgrade costs 100 CR."]);
+      return;
     }
-    else output = "명령을 인식하지 못했습니다. help 를 입력하세요.";
-    setLines((prev) => [...prev, "rookie@blackout:~$ " + command, output]);
-    setCommand("");
+    setCredits((old) => old - 100);
+    setPower((old) => old + 8);
+    setFeed((old) => [...old, "WEAPON UPGRADE COMPLETE // +8 COMBAT POWER"]);
   }
 
   return (
-    <main className="shell">
-      <aside className="sidebar">
-        <a className="brand" href="#"><span className="brand-mark">B_</span><span>BLACKOUT<small>INTELLIGENCE NETWORK</small></span></a>
-        <div className="side-label">OPERATIONS</div>
-        <a className="nav active" href="#overview"><span>◈</span> Overview</a>
-        <a className="nav" href="#missions"><span>▣</span> Missions <i>03</i></a>
-        <a className="nav" href="#terminal"><span>⌘</span> Terminal</a>
-        <a className="nav" href="#loadout"><span>⬡</span> Loadout</a>
-        <div className="side-label second">SYSTEM</div>
-        <a className="nav" href="#profile"><span>◉</span> Agent Profile</a>
-        <a className="nav" href="#settings"><span>⚙</span> Settings</a>
-        <div className="sidebar-bottom"><span className="pulse" /> SYSTEM ONLINE <small>BUILD 0.1.0 / LOCAL</small></div>
-      </aside>
-
-      <section className="content" id="overview">
-        <header className="topbar"><div className="breadcrumb">BLACKOUT <span>/</span> COMMAND CENTER</div><div className="agent"><span className="avatar">R</span><span>ROOKIE AGENT<small>ACCESS LEVEL 01</small></span><span className="online-dot" /></div></header>
-        <div className="hero">
-          <div className="eyebrow"><span className="pulse" /> SECURE CONNECTION ESTABLISHED</div>
-          <h1>WELCOME TO<br /><em>THE SHADOW.</em></h1>
-          <p>정보는 무기다. 흔적은 남기지 마라.<br />BLACKOUT 작전 네트워크에 접속했습니다.</p>
-          <div className="hero-actions"><a className="primary-btn" href="#missions">작전 시작 <span>↗</span></a><a className="ghost-btn" href="#terminal">터미널 열기 <span>⌘</span></a></div>
-          <div className="hero-code">SYS.2049 // NEXUS NODE 07<br />ENCRYPTION: AES-256 // STATUS: STABLE</div>
-        </div>
-
-        <div className="section-head"><div><span className="eyebrow">AGENT STATUS</span><h2>작전 현황</h2></div><span className="muted">LIVE PROFILE</span></div>
-        <div className="stats">
-          <div className="stat"><span>AGENT LEVEL</span><strong>01<span> / 100</span></strong><div className="progress"><b style={{width:"12%"}} /></div><small>EXP 12 / 100</small></div>
-          <div className="stat"><span>MISSION CLEAR</span><strong>{cleared ? "01" : "00"}<span> / 30</span></strong><small>전체 작전 완료</small></div>
-          <div className="stat"><span>CREDITS</span><strong>{cleared ? "300" : "250"}<span> CR</span></strong><small>장비 업그레이드에 사용</small></div>
-          <div className="stat"><span>REPUTATION</span><strong>00<span> REP</span></strong><small>BLACKOUT 신뢰도</small></div>
-        </div>
-
-        <div className="section-head" id="missions"><div><span className="eyebrow">AVAILABLE OPERATIONS</span><h2>미션 브리핑</h2></div><span className="muted">01 / 03 UNLOCKED</span></div>
-        <div className="mission-layout">
-          <div className="mission-list">{missions.map((m) => <button key={m.id} className={"mission-row " + (active.id === m.id ? "selected" : "")} onClick={() => setActive(m)}><span className="rank">{m.rank}</span><span className="mission-info"><strong>{m.name}</strong><small>{m.id} · {m.type}</small></span><span className={"status " + (m.status === "AVAILABLE" ? "available" : "locked")}>{m.status === "AVAILABLE" ? "READY" : "LOCKED"}</span><span className="arrow">↗</span></button>)}</div>
-          <div className="briefing"><div className="briefing-top"><span>MISSION BRIEFING</span><span className="rank-tag">RANK {active.rank}</span></div><h3>{active.name}</h3><p>{active.detail}</p><div className="briefing-meta"><span>REWARD <b>+100 EXP</b></span><span>DIFFICULTY <b>{active.rank}</b></span></div><a href="#terminal" className={"primary-btn full " + (active.status === "LOCKED" ? "disabled" : "")}>터미널에서 시작 <span>→</span></a></div>
-        </div>
-
-        <div className="section-head" id="terminal"><div><span className="eyebrow">SIMULATION ENVIRONMENT</span><h2>BLACKOUT 터미널</h2></div><span className="muted">SAFE MODE ENABLED</span></div>
-        <div className="terminal"><div className="terminal-bar"><div className="window-dots"><i /><i /><i /></div><span>blackout@secure-node:~</span><span className="terminal-state">● CONNECTED</span></div><div className="terminal-body">{lines.map((line, i) => <div className={line.startsWith("rookie@") ? "input-line" : "output-line"} key={i}>{line}</div>)}<div className="command-line"><span>rookie@blackout:~$</span><input aria-label="Terminal command" value={command} onChange={(e) => setCommand(e.target.value)} onKeyDown={(e) => e.key === "Enter" && runCommand()} placeholder="명령어 입력..." /><button onClick={runCommand}>실행 ↵</button></div></div></div>
-        <footer>BLACKOUT SIMULATION NETWORK <span>FICTIONAL ENVIRONMENT // NO REAL SYSTEM ACCESS</span></footer>
+    <main className="game-shell">
+      <header className="game-header">
+        <a className="game-brand" href="#"><span className="brand-mark">B_</span><span>BLACKOUT<small>AGENT RPG // 2049</small></span></a>
+        <span className="online"><i /> SIMULATION ONLINE</span>
+      </header>
+      <section className="welcome">
+        <div className="eyebrow">ROOKIE OPERATIVE // COMMAND HUB</div>
+        <h1>BUILD YOUR<br /><em>LEGEND.</em></h1>
+        <p>작전을 완료하고 요원을 성장시켜라.<br />전투는 자동으로 진행됩니다.</p>
       </section>
+      <section className="profile-grid">
+        <article className="profile-card"><span>AGENT LEVEL</span><strong>LV. {String(level).padStart(2, "0")}</strong><div className="bar"><b style={{ width: `${Math.min(100, exp / needExp * 100)}%` }} /></div><small>{exp} / {needExp} EXP</small></article>
+        <article className="profile-card"><span>COMBAT POWER</span><strong>{power}<small> CP</small></strong><small>요원 전투 능력</small></article>
+        <article className="profile-card"><span>CREDITS</span><strong>{credits}<small> CR</small></strong><small>장비 강화에 사용</small></article>
+        <article className="profile-card"><span>MISSIONS</span><strong>{cleared.length}<small> / 3</small></strong><small>완료한 작전</small></article>
+      </section>
+      <section className="section-title"><div><span className="eyebrow">OPERATIONS</span><h2>미션 선택</h2></div><span className="subtle">CLEAR TO UNLOCK</span></section>
+      <div className="mission-grid">
+        <div className="mission-list">{missions.map((m) => <button key={m.id} onClick={() => setSelected(m.id)} className={`mission-card ${selected === m.id ? "chosen" : ""}`}><span className="mission-rank">{m.rank}</span><span className="mission-name"><b>{m.name}</b><small>{m.enemy} · POWER {m.power}</small></span><span className={unlocked(m.id) ? "ready" : "locked"}>{cleared.includes(m.id) ? "CLEARED" : unlocked(m.id) ? "READY" : "LOCKED"}</span></button>)}</div>
+        <article className="mission-detail"><div className="detail-top"><span>MISSION BRIEF</span><b>RANK {mission.rank}</b></div><h3>{mission.name}</h3><p>목표: {mission.enemy}를 제압하라. 자동 전투에서 승리하면 보상을 획득합니다.</p><div className="reward-row"><span>REWARD <b>+{mission.exp} EXP</b></span><span><b>+{mission.reward} CR</b></span></div><button className="main-button" disabled={!unlocked(mission.id) || cleared.includes(mission.id) || battle} onClick={startMission}>{battle ? "AUTO BATTLE IN PROGRESS..." : cleared.includes(mission.id) ? "MISSION CLEARED" : unlocked(mission.id) ? "START AUTO BATTLE →" : "MISSION LOCKED"}</button></article>
+      </div>
+      <section className="section-title"><div><span className="eyebrow">LIVE COMBAT</span><h2>자동 전투</h2></div><span className="subtle">{battle ? "ENGAGED" : "STANDBY"}</span></section>
+      <section className="battle-panel">
+        <div className="combatants"><div className="combatant"><div className="fighter-icon">R</div><b>ROOKIE AGENT</b><small>LV.{level} · {power} CP</small><div className="hp"><b style={{ width: `${playerHp}%` }} /></div><small>HP {playerHp}/100</small></div><div className="versus">VS</div><div className="combatant"><div className="fighter-icon enemy">×</div><b>{mission.enemy}</b><small>RANK {mission.rank}</small><div className="hp enemy-hp"><b style={{ width: `${enemyHp}%` }} /></div><small>HP {enemyHp}/100</small></div></div>
+        <div className="battle-feed">{feed.slice(-6).map((line, i) => <p key={i}>{line}</p>)}</div>
+      </section>
+      <section className="section-title"><div><span className="eyebrow">UPGRADE BAY</span><h2>장비 강화</h2></div><span className="subtle">COST 100 CR</span></section>
+      <section className="upgrade-panel"><div><b>TACTICAL WEAPON MOD</b><p>무기를 강화해 전투력을 +8 올립니다.</p></div><button className="upgrade-button" onClick={upgrade} disabled={battle}>UPGRADE · 100 CR</button></section>
+      <footer className="game-footer">BLACKOUT // FICTIONAL AGENT RPG <span>SIMULATION ONLY · NO REAL SYSTEM ACCESS</span></footer>
     </main>
   );
 }
