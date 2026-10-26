@@ -1,123 +1,134 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
-type Mission = { id: number; name: string; rank: string; enemy: string; power: number; reward: number; exp: number; unlocked: boolean };
+type Subject = "국어" | "수학" | "영어" | "사회" | "과학" | "기타";
+type Session = { subject: Subject; minutes: number; finishedAt: string };
 
-const missions: Mission[] = [
-  { id: 1, name: "FIRST CONTACT", rank: "E", enemy: "ROGUE DRONE", power: 18, reward: 60, exp: 45, unlocked: true },
-  { id: 2, name: "GHOST SIGNAL", rank: "D", enemy: "SECURITY BOT", power: 32, reward: 100, exp: 75, unlocked: false },
-  { id: 3, name: "BROKEN WALL", rank: "C", enemy: "SENTINEL MK-I", power: 55, reward: 160, exp: 120, unlocked: false },
-];
+const subjects: Subject[] = ["국어", "수학", "영어", "사회", "과학", "기타"];
+const FOCUS_MINUTES = 25;
+const BREAK_MINUTES = 5;
 
 export default function Home() {
-  const [level, setLevel] = useState(1);
-  const [exp, setExp] = useState(0);
-  const [credits, setCredits] = useState(250);
-  const [power, setPower] = useState(24);
-  const [cleared, setCleared] = useState<number[]>([]);
-  const [selected, setSelected] = useState(1);
-  const [battle, setBattle] = useState(false);
-  const [playerHp, setPlayerHp] = useState(100);
-  const [enemyHp, setEnemyHp] = useState(100);
-  const [feed, setFeed] = useState<string[]>(["BLACKOUT combat simulator ready.", "미션을 선택하고 자동 전투를 시작하세요."]);
-  const [busy, setBusy] = useState(false);
-
-  const mission = missions[selected - 1];
-  const needExp = level * 100;
-  const unlocked = (id: number) => id === 1 || cleared.includes(id - 1);
+  const [subject, setSubject] = useState<Subject>("수학");
+  const [mode, setMode] = useState<"focus" | "break">("focus");
+  const [seconds, setSeconds] = useState(FOCUS_MINUTES * 60);
+  const [running, setRunning] = useState(false);
+  const [sessions, setSessions] = useState<Session[]>([]);
+  const [dark, setDark] = useState(true);
 
   useEffect(() => {
-    if (!battle || busy) return;
-    setBusy(true);
-    const timer = window.setTimeout(() => {
-      const damage = Math.max(7, power + Math.floor(Math.random() * 9) - 5);
-      const nextEnemy = Math.max(0, enemyHp - damage);
-      setEnemyHp(nextEnemy);
-      setFeed((old) => [...old, `ROOKIE attacks ${mission.enemy} for ${damage} DMG.`]);
-      if (nextEnemy <= 0) {
-        setBattle(false);
-        setBusy(false);
-        setCleared((old) => old.includes(mission.id) ? old : [...old, mission.id]);
-        setCredits((old) => old + mission.reward);
-        setExp((old) => {
-          let total = old + mission.exp;
-          let nextLevel = level;
-          while (total >= nextLevel * 100) {
-            total -= nextLevel * 100;
-            nextLevel += 1;
-          }
-          if (nextLevel > level) {
-            setLevel(nextLevel);
-            setPower((p) => p + (nextLevel - level) * 5);
-            setFeed((f) => [...f, `LEVEL UP! AGENT LEVEL ${nextLevel} // COMBAT POWER INCREASED`]);
-          }
-          return total;
-        });
-        setFeed((old) => [...old, `MISSION CLEAR! +${mission.exp} EXP / +${mission.reward} CR`]);
-        return;
-      }
-      const retaliation = Math.max(5, Math.floor(mission.power * 0.45) + Math.floor(Math.random() * 5));
-      const nextPlayer = Math.max(0, playerHp - retaliation);
-      setPlayerHp(nextPlayer);
-      setFeed((old) => [...old, `${mission.enemy} counterattacks for ${retaliation} DMG.`]);
-      if (nextPlayer <= 0) {
-        setBattle(false);
-        setFeed((old) => [...old, "MISSION FAILED. Recover and try again."]);
-      }
-      setBusy(false);
-    }, 850);
-    return () => window.clearTimeout(timer);
-  }, [battle, busy, enemyHp, playerHp, power, mission, level]);
+    try {
+      const saved = localStorage.getItem("study-sessions");
+      if (saved) setSessions(JSON.parse(saved) as Session[]);
+      const theme = localStorage.getItem("study-theme");
+      if (theme) setDark(theme === "dark");
+    } catch {
+      // Ignore unavailable or invalid local storage.
+    }
+  }, []);
 
-  function startMission() {
-    if (!unlocked(mission.id) || cleared.includes(mission.id)) return;
-    setPlayerHp(100);
-    setEnemyHp(100);
-    setBattle(true);
-    setFeed((old) => [...old, `MISSION START // ${mission.name}`, `TARGET: ${mission.enemy}`]);
+  useEffect(() => {
+    if (!running) return;
+    const timer = window.setInterval(() => {
+      setSeconds((current) => {
+        if (current <= 1) {
+          setRunning(false);
+          if (mode === "focus") {
+            const record = { subject, minutes: FOCUS_MINUTES, finishedAt: new Date().toISOString() };
+            setSessions((old) => {
+              const next = [record, ...old];
+              try { localStorage.setItem("study-sessions", JSON.stringify(next)); } catch {}
+              return next;
+            });
+            setMode("break");
+            return BREAK_MINUTES * 60;
+          }
+          setMode("focus");
+          return FOCUS_MINUTES * 60;
+        }
+        return current - 1;
+      });
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [running, mode, subject]);
+
+  const todaySessions = useMemo(() => {
+    const today = new Date().toDateString();
+    return sessions.filter((s) => new Date(s.finishedAt).toDateString() === today);
+  }, [sessions]);
+  const todayMinutes = todaySessions.reduce((sum, s) => sum + s.minutes, 0);
+  const subjectMinutes = subjects.map((name) => ({
+    name,
+    minutes: todaySessions.filter((s) => s.subject === name).reduce((sum, s) => sum + s.minutes, 0),
+  }));
+  const totalSeconds = mode === "focus" ? FOCUS_MINUTES * 60 : BREAK_MINUTES * 60;
+  const progress = ((totalSeconds - seconds) / totalSeconds) * 100;
+  const time = `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
+
+  function resetTimer(nextMode = mode) {
+    setRunning(false);
+    setMode(nextMode);
+    setSeconds(nextMode === "focus" ? FOCUS_MINUTES * 60 : BREAK_MINUTES * 60);
   }
 
-  function upgrade() {
-    if (credits < 100) {
-      setFeed((old) => [...old, "NOT ENOUGH CREDITS. Upgrade costs 100 CR."]);
-      return;
-    }
-    setCredits((old) => old - 100);
-    setPower((old) => old + 8);
-    setFeed((old) => [...old, "WEAPON UPGRADE COMPLETE // +8 COMBAT POWER"]);
+  function toggleTheme() {
+    const next = !dark;
+    setDark(next);
+    try { localStorage.setItem("study-theme", next ? "dark" : "light"); } catch {}
   }
 
   return (
-    <main className="game-shell">
-      <header className="game-header">
-        <a className="game-brand" href="#"><span className="brand-mark">B_</span><span>BLACKOUT<small>AGENT RPG // 2049</small></span></a>
-        <span className="online"><i /> SIMULATION ONLINE</span>
-      </header>
-      <section className="welcome">
-        <div className="eyebrow">ROOKIE OPERATIVE // COMMAND HUB</div>
-        <h1>BUILD YOUR<br /><em>LEGEND.</em></h1>
-        <p>작전을 완료하고 요원을 성장시켜라.<br />전투는 자동으로 진행됩니다.</p>
-      </section>
-      <section className="profile-grid">
-        <article className="profile-card"><span>AGENT LEVEL</span><strong>LV. {String(level).padStart(2, "0")}</strong><div className="bar"><b style={{ width: `${Math.min(100, exp / needExp * 100)}%` }} /></div><small>{exp} / {needExp} EXP</small></article>
-        <article className="profile-card"><span>COMBAT POWER</span><strong>{power}<small> CP</small></strong><small>요원 전투 능력</small></article>
-        <article className="profile-card"><span>CREDITS</span><strong>{credits}<small> CR</small></strong><small>장비 강화에 사용</small></article>
-        <article className="profile-card"><span>MISSIONS</span><strong>{cleared.length}<small> / 3</small></strong><small>완료한 작전</small></article>
-      </section>
-      <section className="section-title"><div><span className="eyebrow">OPERATIONS</span><h2>미션 선택</h2></div><span className="subtle">CLEAR TO UNLOCK</span></section>
-      <div className="mission-grid">
-        <div className="mission-list">{missions.map((m) => <button key={m.id} onClick={() => setSelected(m.id)} className={`mission-card ${selected === m.id ? "chosen" : ""}`}><span className="mission-rank">{m.rank}</span><span className="mission-name"><b>{m.name}</b><small>{m.enemy} · POWER {m.power}</small></span><span className={unlocked(m.id) ? "ready" : "locked"}>{cleared.includes(m.id) ? "CLEARED" : unlocked(m.id) ? "READY" : "LOCKED"}</span></button>)}</div>
-        <article className="mission-detail"><div className="detail-top"><span>MISSION BRIEF</span><b>RANK {mission.rank}</b></div><h3>{mission.name}</h3><p>목표: {mission.enemy}를 제압하라. 자동 전투에서 승리하면 보상을 획득합니다.</p><div className="reward-row"><span>REWARD <b>+{mission.exp} EXP</b></span><span><b>+{mission.reward} CR</b></span></div><button className="main-button" disabled={!unlocked(mission.id) || cleared.includes(mission.id) || battle} onClick={startMission}>{battle ? "AUTO BATTLE IN PROGRESS..." : cleared.includes(mission.id) ? "MISSION CLEARED" : unlocked(mission.id) ? "START AUTO BATTLE →" : "MISSION LOCKED"}</button></article>
+    <main className={`study-app ${dark ? "dark" : "light"}`}>
+      <div className="page-wrap">
+        <header className="topbar">
+          <a className="brand" href="#"><span className="brand-icon">S</span><span>STUDYFLOW<small>FOCUS • TRACK • GROW</small></span></a>
+          <button className="theme-toggle" onClick={toggleTheme} aria-label="테마 변경">{dark ? "☼" : "☾"} <span>{dark ? "라이트 모드" : "다크 모드"}</span></button>
+        </header>
+
+        <section className="intro">
+          <p className="eyebrow">YOUR PERSONAL STUDY SPACE</p>
+          <h1>집중할 시간,<br /><em>지금 시작해.</em></h1>
+          <p className="intro-copy">작은 집중이 쌓여 큰 성장이 됩니다.<br />오늘의 공부를 차근차근 기록해 보세요.</p>
+        </section>
+
+        <section className="workspace">
+          <article className="timer-card">
+            <div className="timer-heading">
+              <div><span className="eyebrow">POMODORO TIMER</span><h2>{mode === "focus" ? "집중 세션" : "짧은 휴식"}</h2></div>
+              <span className={`mode-pill ${mode}`}>{mode === "focus" ? "FOCUS" : "BREAK"}</span>
+            </div>
+            <div className="timer-ring" style={{ "--progress": `${progress}%` } as React.CSSProperties}>
+              <div className="timer-inner"><span className="timer-label">{mode === "focus" ? "FOCUS TIME" : "TAKE A BREATH"}</span><strong>{time}</strong><span className="timer-caption">{mode === "focus" ? "지금은 한 가지에만 집중" : "잠깐 쉬어가도 좋아요"}</span></div>
+            </div>
+            <div className="timer-actions">
+              <button className="primary-btn" onClick={() => setRunning((v) => !v)}>{running ? "일시정지" : "시작하기"} <span>{running ? "Ⅱ" : "▶"}</span></button>
+              <button className="reset-btn" onClick={() => resetTimer()}>초기화 ↺</button>
+            </div>
+            <div className="timer-settings"><button className={mode === "focus" ? "selected" : ""} onClick={() => resetTimer("focus")}>집중 25분</button><button className={mode === "break" ? "selected" : ""} onClick={() => resetTimer("break")}>휴식 5분</button></div>
+          </article>
+
+          <aside className="side-column">
+            <article className="subject-card">
+              <div className="card-heading"><div><span className="eyebrow">STUDY SUBJECT</span><h2>오늘 공부할 과목</h2></div><span className="tiny-icon">✎</span></div>
+              <div className="subject-grid">{subjects.map((item, i) => <button key={item} className={subject === item ? "subject-option active" : "subject-option"} onClick={() => setSubject(item)}><span className="subject-symbol">{["가", "∑", "A", "지", "⚛", "＋"][i]}</span>{item}</button>)}</div>
+              <p className="subject-note">선택한 과목이 집중 기록에 저장돼요.</p>
+            </article>
+            <article className="daily-card">
+              <div className="card-heading"><div><span className="eyebrow">TODAY'S PROGRESS</span><h2>오늘의 기록</h2></div><span className="tiny-icon">↗</span></div>
+              <div className="daily-total"><strong>{Math.floor(todayMinutes / 60)}<small>시간</small> {todayMinutes % 60}<small>분</small></strong><span>{todaySessions.length}회 집중 완료</span></div>
+              <div className="daily-bar"><span style={{ width: `${Math.min(100, todayMinutes / 120 * 100)}%` }} /></div>
+              <div className="goal-line"><span>일일 목표 2시간</span><b>{Math.min(100, Math.round(todayMinutes / 120 * 100))}%</b></div>
+            </article>
+          </aside>
+        </section>
+
+        <section className="stats-section">
+          <div className="section-heading"><div><span className="eyebrow">SUBJECT BREAKDOWN</span><h2>과목별 공부 시간</h2></div><span className="today-label">TODAY</span></div>
+          <div className="stats-grid">{subjectMinutes.map((item, i) => <article className="stat-card" key={item.name}><div className="stat-top"><span className="stat-dot" style={{ "--dot": ["#9d8cff", "#65b9ff", "#f4b66b", "#6bd4b2", "#f28b9a", "#a6b2bf"][i] } as React.CSSProperties} /><b>{item.name}</b><span>{item.minutes}분</span></div><div className="stat-bar"><span style={{ width: `${todayMinutes ? item.minutes / Math.max(...subjectMinutes.map((x) => x.minutes), 1) * 100 : 0}%`, "--dot": ["#9d8cff", "#65b9ff", "#f4b66b", "#6bd4b2", "#f28b9a", "#a6b2bf"][i] } as React.CSSProperties} /></div></article>)}</div>
+        </section>
+        <footer className="footer"><span>STUDYFLOW</span><span>한 번에 한 걸음씩.</span></footer>
       </div>
-      <section className="section-title"><div><span className="eyebrow">LIVE COMBAT</span><h2>자동 전투</h2></div><span className="subtle">{battle ? "ENGAGED" : "STANDBY"}</span></section>
-      <section className="battle-panel">
-        <div className="combatants"><div className="combatant"><div className="fighter-icon">R</div><b>ROOKIE AGENT</b><small>LV.{level} · {power} CP</small><div className="hp"><b style={{ width: `${playerHp}%` }} /></div><small>HP {playerHp}/100</small></div><div className="versus">VS</div><div className="combatant"><div className="fighter-icon enemy">×</div><b>{mission.enemy}</b><small>RANK {mission.rank}</small><div className="hp enemy-hp"><b style={{ width: `${enemyHp}%` }} /></div><small>HP {enemyHp}/100</small></div></div>
-        <div className="battle-feed">{feed.slice(-6).map((line, i) => <p key={i}>{line}</p>)}</div>
-      </section>
-      <section className="section-title"><div><span className="eyebrow">UPGRADE BAY</span><h2>장비 강화</h2></div><span className="subtle">COST 100 CR</span></section>
-      <section className="upgrade-panel"><div><b>TACTICAL WEAPON MOD</b><p>무기를 강화해 전투력을 +8 올립니다.</p></div><button className="upgrade-button" onClick={upgrade} disabled={battle}>UPGRADE · 100 CR</button></section>
-      <footer className="game-footer">BLACKOUT // FICTIONAL AGENT RPG <span>SIMULATION ONLY · NO REAL SYSTEM ACCESS</span></footer>
     </main>
   );
 }
