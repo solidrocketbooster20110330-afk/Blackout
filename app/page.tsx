@@ -7,11 +7,9 @@ type Session = { subject: Subject; minutes: number; finishedAt: string };
 
 const subjects: Subject[] = ["국어", "수학", "영어", "사회", "과학", "기타"];
 const FOCUS_MINUTES = 25;
-const BREAK_MINUTES = 5;
 
 export default function Home() {
   const [subject, setSubject] = useState<Subject>("수학");
-  const [mode, setMode] = useState<"focus" | "break">("focus");
   const [seconds, setSeconds] = useState(FOCUS_MINUTES * 60);
   const [running, setRunning] = useState(false);
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -34,17 +32,12 @@ export default function Home() {
       setSeconds((current) => {
         if (current <= 1) {
           setRunning(false);
-          if (mode === "focus") {
-            const record = { subject, minutes: FOCUS_MINUTES, finishedAt: new Date().toISOString() };
-            setSessions((old) => {
-              const next = [record, ...old];
-              try { localStorage.setItem("study-sessions", JSON.stringify(next)); } catch {}
-              return next;
-            });
-            setMode("break");
-            return BREAK_MINUTES * 60;
-          }
-          setMode("focus");
+          const record = { subject, minutes: FOCUS_MINUTES, finishedAt: new Date().toISOString() };
+          setSessions((old) => {
+            const next = [record, ...old];
+            try { localStorage.setItem("study-sessions", JSON.stringify(next)); } catch {}
+            return next;
+          });
           return FOCUS_MINUTES * 60;
         }
         return current - 1;
@@ -62,14 +55,13 @@ export default function Home() {
     name,
     minutes: todaySessions.filter((s) => s.subject === name).reduce((sum, s) => sum + s.minutes, 0),
   }));
-  const totalSeconds = mode === "focus" ? FOCUS_MINUTES * 60 : BREAK_MINUTES * 60;
+  const totalSeconds = FOCUS_MINUTES * 60;
   const progress = ((totalSeconds - seconds) / totalSeconds) * 100;
   const time = `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
 
-  function resetTimer(nextMode = mode) {
+  function resetTimer() {
     setRunning(false);
-    setMode(nextMode);
-    setSeconds(nextMode === "focus" ? FOCUS_MINUTES * 60 : BREAK_MINUTES * 60);
+    setSeconds(FOCUS_MINUTES * 60);
   }
 
   function toggleTheme() {
@@ -95,17 +87,17 @@ export default function Home() {
         <section className="workspace">
           <article className="timer-card">
             <div className="timer-heading">
-              <div><span className="eyebrow">POMODORO TIMER</span><h2>{mode === "focus" ? "집중 세션" : "짧은 휴식"}</h2></div>
-              <span className={`mode-pill ${mode}`}>{mode === "focus" ? "FOCUS" : "BREAK"}</span>
+              <div><span className="eyebrow">STUDY TIMER</span><h2>집중 세션</h2></div>
+              <span className="mode-pill focus">FOCUS</span>
             </div>
             <div className="timer-ring" style={{ "--progress": `${progress}%` } as React.CSSProperties}>
-              <div className="timer-inner"><span className="timer-label">{mode === "focus" ? "FOCUS TIME" : "TAKE A BREATH"}</span><strong>{time}</strong><span className="timer-caption">{mode === "focus" ? "지금은 한 가지에만 집중" : "잠깐 쉬어가도 좋아요"}</span></div>
+              <div className="timer-inner"><span className="timer-label">FOCUS TIME</span><strong>{time}</strong><span className="timer-caption">지금은 한 가지에만 집중</span></div>
             </div>
             <div className="timer-actions">
               <button className="primary-btn" onClick={() => setRunning((v) => !v)}>{running ? "일시정지" : "시작하기"} <span>{running ? "Ⅱ" : "▶"}</span></button>
               <button className="reset-btn" onClick={() => resetTimer()}>초기화 ↺</button>
             </div>
-            <div className="timer-settings"><button className={mode === "focus" ? "selected" : ""} onClick={() => resetTimer("focus")}>집중 25분</button><button className={mode === "break" ? "selected" : ""} onClick={() => resetTimer("break")}>휴식 5분</button></div>
+            <div className="timer-settings"><button className="selected" onClick={resetTimer}>집중 25분</button><span className="timer-caption">완료하면 기록에 자동 저장</span></div>
           </article>
 
           <aside className="side-column">
