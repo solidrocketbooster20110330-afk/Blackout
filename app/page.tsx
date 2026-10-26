@@ -1,123 +1,112 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 type Subject = "국어" | "수학" | "영어" | "사회" | "과학" | "기타";
-type Session = { subject: Subject; minutes: number; finishedAt: string };
-
+type Session = { subject: Subject; seconds: number; finishedAt: string };
 const subjects: Subject[] = ["국어", "수학", "영어", "사회", "과학", "기타"];
-const FOCUS_MINUTES = 25;
 
 export default function Home() {
   const [subject, setSubject] = useState<Subject>("수학");
-  const [seconds, setSeconds] = useState(FOCUS_MINUTES * 60);
+  const [elapsed, setElapsed] = useState(0);
   const [running, setRunning] = useState(false);
   const [sessions, setSessions] = useState<Session[]>([]);
-  const [dark, setDark] = useState(true);
+  const startedAt = useRef<number | null>(null);
 
   useEffect(() => {
     try {
       const saved = localStorage.getItem("study-sessions");
-      if (saved) setSessions(JSON.parse(saved) as Session[]);
-      const theme = localStorage.getItem("study-theme");
-      if (theme) setDark(theme === "dark");
-    } catch {
-      // Ignore unavailable or invalid local storage.
-    }
+      if (saved) {
+        const old = JSON.parse(saved) as Array<{subject: Subject; minutes?: number; seconds?: number; finishedAt: string}>;
+        setSessions(old.map((s) => ({subject:s.subject, seconds:s.seconds ?? (s.minutes ?? 0) * 60, finishedAt:s.finishedAt})));
+      }
+    } catch {}
   }, []);
 
   useEffect(() => {
     if (!running) return;
-    const timer = window.setInterval(() => {
-      setSeconds((current) => {
-        if (current <= 1) {
-          setRunning(false);
-          const record = { subject, minutes: FOCUS_MINUTES, finishedAt: new Date().toISOString() };
-          setSessions((old) => {
-            const next = [record, ...old];
-            try { localStorage.setItem("study-sessions", JSON.stringify(next)); } catch {}
-            return next;
-          });
-          return FOCUS_MINUTES * 60;
-        }
-        return current - 1;
-      });
-    }, 1000);
-    return () => window.clearInterval(timer);
-  }, [running, mode, subject]);
+    const tick = window.setInterval(() => {
+      if (startedAt.current !== null) setElapsed((Date.now() - startedAt.current) / 1000);
+    }, 250);
+    return () => window.clearInterval(tick);
+  }, [running]);
 
-  const todaySessions = useMemo(() => {
-    const today = new Date().toDateString();
-    return sessions.filter((s) => new Date(s.finishedAt).toDateString() === today);
-  }, [sessions]);
-  const todayMinutes = todaySessions.reduce((sum, s) => sum + s.minutes, 0);
-  const subjectMinutes = subjects.map((name) => ({
-    name,
-    minutes: todaySessions.filter((s) => s.subject === name).reduce((sum, s) => sum + s.minutes, 0),
-  }));
-  const totalSeconds = FOCUS_MINUTES * 60;
-  const progress = ((totalSeconds - seconds) / totalSeconds) * 100;
-  const time = `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
+  const today = useMemo(() => sessions.filter((s) => new Date(s.finishedAt).toDateString() === new Date().toDateString()), [sessions]);
+  const todaySeconds = today.reduce((sum, s) => sum + s.seconds, 0);
+  const format = (n: number) => {
+    const whole = Math.floor(n);
+    return [Math.floor(whole / 3600), Math.floor((whole % 3600) / 60), whole % 60].map((v) => String(v).padStart(2, "0")).join(":");
+  };
 
-  function resetTimer() {
-    setRunning(false);
-    setSeconds(FOCUS_MINUTES * 60);
+  function startPause() {
+    if (running) {
+      if (startedAt.current !== null) setElapsed((Date.now() - startedAt.current) / 1000);
+      startedAt.current = null;
+      setRunning(false);
+    } else {
+      startedAt.current = Date.now() - elapsed * 1000;
+      setRunning(true);
+    }
   }
 
-  function toggleTheme() {
-    const next = !dark;
-    setDark(next);
-    try { localStorage.setItem("study-theme", next ? "dark" : "light"); } catch {}
+  function finishSession() {
+    if (running && startedAt.current !== null) setElapsed((Date.now() - startedAt.current) / 1000);
+    const duration = running && startedAt.current !== null ? (Date.now() - startedAt.current) / 1000 : elapsed;
+    startedAt.current = null;
+    setRunning(false);
+    if (duration < 1) { setElapsed(0); return; }
+    const record: Session = { subject, seconds: Math.floor(duration), finishedAt: new Date().toISOString() };
+    setSessions((old) => {
+      const next = [record, ...old];
+      try { localStorage.setItem("study-sessions", JSON.stringify(next)); } catch {}
+      return next;
+    });
+    setElapsed(0);
+  }
+
+  function reset() {
+    startedAt.current = running ? Date.now() : null;
+    setElapsed(0);
+    if (running) startedAt.current = Date.now();
   }
 
   return (
-    <main className={`study-app ${dark ? "dark" : "light"}`}>
+    <main className="study-app dark">
       <div className="page-wrap">
         <header className="topbar">
           <a className="brand" href="#"><span className="brand-icon">S</span><span>STUDYFLOW<small>FOCUS • TRACK • GROW</small></span></a>
-          <button className="theme-toggle" onClick={toggleTheme} aria-label="테마 변경">{dark ? "☼" : "☾"} <span>{dark ? "라이트 모드" : "다크 모드"}</span></button>
+          <span className="mono status">{running ? "● RECORDING" : "○ READY"}</span>
         </header>
-
         <section className="intro">
           <p className="eyebrow">YOUR PERSONAL STUDY SPACE</p>
           <h1>집중할 시간,<br /><em>지금 시작해.</em></h1>
-          <p className="intro-copy">작은 집중이 쌓여 큰 성장이 됩니다.<br />오늘의 공부를 차근차근 기록해 보세요.</p>
+          <p className="intro-copy">시간을 재고, 오늘의 공부를 기록해 보세요.</p>
         </section>
-
         <section className="workspace">
           <article className="timer-card">
-            <div className="timer-heading">
-              <div><span className="eyebrow">STUDY TIMER</span><h2>집중 세션</h2></div>
-              <span className="mode-pill focus">FOCUS</span>
-            </div>
-            <div className="timer-ring" style={{ "--progress": `${progress}%` } as React.CSSProperties}>
-              <div className="timer-inner"><span className="timer-label">FOCUS TIME</span><strong>{time}</strong><span className="timer-caption">지금은 한 가지에만 집중</span></div>
-            </div>
+            <div className="timer-heading"><div><span className="eyebrow">STOPWATCH</span><h2>공부 스톱워치</h2></div><span className="mode-pill">{running ? "RUNNING" : "STOPPED"}</span></div>
+            <div className="stopwatch-face"><span className="timer-label">ELAPSED TIME</span><strong>{format(elapsed)}</strong><span className="timer-caption">{running ? "집중 중입니다" : "시작 버튼을 눌러 측정하세요"}</span></div>
             <div className="timer-actions">
-              <button className="primary-btn" onClick={() => setRunning((v) => !v)}>{running ? "일시정지" : "시작하기"} <span>{running ? "Ⅱ" : "▶"}</span></button>
-              <button className="reset-btn" onClick={() => resetTimer()}>초기화 ↺</button>
+              <button className="primary-btn" onClick={startPause}>{running ? "일시정지 Ⅱ" : elapsed > 0 ? "계속하기 ▶" : "시작하기 ▶"}</button>
+              <button className="reset-btn" onClick={reset}>초기화 ↺</button>
+              <button className="reset-btn finish-btn" onClick={finishSession}>기록 저장</button>
             </div>
-            <div className="timer-settings"><button className="selected" onClick={resetTimer}>집중 25분</button><span className="timer-caption">완료하면 기록에 자동 저장</span></div>
+            <p className="timer-caption save-hint">기록 저장을 누르면 선택한 과목에 공부 시간이 추가돼요.</p>
           </article>
-
           <aside className="side-column">
-            <article className="subject-card">
-              <div className="card-heading"><div><span className="eyebrow">STUDY SUBJECT</span><h2>오늘 공부할 과목</h2></div><span className="tiny-icon">✎</span></div>
-              <div className="subject-grid">{subjects.map((item, i) => <button key={item} className={subject === item ? "subject-option active" : "subject-option"} onClick={() => setSubject(item)}><span className="subject-symbol">{["가", "∑", "A", "지", "⚛", "＋"][i]}</span>{item}</button>)}</div>
-              <p className="subject-note">선택한 과목이 집중 기록에 저장돼요.</p>
+            <article className="subject-card"><div className="card-heading"><div><span className="eyebrow">STUDY SUBJECT</span><h2>공부 과목</h2></div></div>
+              <div className="subject-grid">{subjects.map((item) => <button key={item} className={subject === item ? "subject-option active" : "subject-option"} onClick={() => setSubject(item)}>{item}</button>)}</div>
+              <p className="subject-note">측정 중 과목을 바꾸면 저장할 때 선택한 과목으로 기록돼요.</p>
             </article>
-            <article className="daily-card">
-              <div className="card-heading"><div><span className="eyebrow">TODAY'S PROGRESS</span><h2>오늘의 기록</h2></div><span className="tiny-icon">↗</span></div>
-              <div className="daily-total"><strong>{Math.floor(todayMinutes / 60)}<small>시간</small> {todayMinutes % 60}<small>분</small></strong><span>{todaySessions.length}회 집중 완료</span></div>
-              <div className="daily-bar"><span style={{ width: `${Math.min(100, todayMinutes / 120 * 100)}%` }} /></div>
-              <div className="goal-line"><span>일일 목표 2시간</span><b>{Math.min(100, Math.round(todayMinutes / 120 * 100))}%</b></div>
+            <article className="daily-card"><div className="card-heading"><div><span className="eyebrow">TODAY'S TOTAL</span><h2>오늘의 공부 시간</h2></div></div>
+              <div className="daily-total"><strong>{format(todaySeconds)}</strong><span>{today.length}개 세션</span></div>
+              <div className="daily-bar"><span style={{width:`${Math.min(100,todaySeconds/7200*100)}%`}} /></div>
+              <div className="goal-line"><span>일일 목표 2시간</span><b>{Math.min(100,Math.round(todaySeconds/7200*100))}%</b></div>
             </article>
           </aside>
         </section>
-
-        <section className="stats-section">
-          <div className="section-heading"><div><span className="eyebrow">SUBJECT BREAKDOWN</span><h2>과목별 공부 시간</h2></div><span className="today-label">TODAY</span></div>
-          <div className="stats-grid">{subjectMinutes.map((item, i) => <article className="stat-card" key={item.name}><div className="stat-top"><span className="stat-dot" style={{ "--dot": ["#9d8cff", "#65b9ff", "#f4b66b", "#6bd4b2", "#f28b9a", "#a6b2bf"][i] } as React.CSSProperties} /><b>{item.name}</b><span>{item.minutes}분</span></div><div className="stat-bar"><span style={{ width: `${todayMinutes ? item.minutes / Math.max(...subjectMinutes.map((x) => x.minutes), 1) * 100 : 0}%`, "--dot": ["#9d8cff", "#65b9ff", "#f4b66b", "#6bd4b2", "#f28b9a", "#a6b2bf"][i] } as React.CSSProperties} /></div></article>)}</div>
+        <section className="stats-section"><div className="section-heading"><div><span className="eyebrow">SUBJECT BREAKDOWN</span><h2>과목별 공부 시간</h2></div><span className="today-label">TODAY</span></div>
+          <div className="stats-grid">{subjects.map((name) => { const secs = today.filter((s) => s.subject === name).reduce((sum,s) => sum+s.seconds,0); return <article className="stat-card" key={name}><div className="stat-top"><b>{name}</b><span>{format(secs)}</span></div><div className="stat-bar"><span style={{width:`${todaySeconds ? secs/Math.max(...subjects.map((n)=>today.filter((s)=>s.subject===n).reduce((sum,s)=>sum+s.seconds,0)),1)*100 : 0}%`}} /></div></article>; })}</div>
         </section>
         <footer className="footer"><span>STUDYFLOW</span><span>한 번에 한 걸음씩.</span></footer>
       </div>
